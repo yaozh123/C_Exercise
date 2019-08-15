@@ -1,7 +1,7 @@
 /*
 时间：2019-8-13
 功能：用c语言开发一个最简单的服务器
-版本：cwebserver 1.0
+版本：cwebserver 1.1 允许多个客户端同时访问服务器
 */
 #include<stdio.h>
 #include<string.h>
@@ -14,11 +14,14 @@
 #include<netinet/ip.h>
 #include<errno.h>
 #include<arpa/inet.h>
+#include<pthread.h>
 
 #define SERV_PORT 8080
 #define SERV_IP_ADDR "127.0.0.1"
 #define BACKLOG 5
 #define QUIT_STR "quit"
+
+void *cli_data_handle(void *arg);
 
 int main(void)
 {
@@ -35,15 +38,12 @@ int main(void)
     bzero(&sin, sizeof(sin));
     sin.sin_family = AF_INET;
     sin.sin_port = htons(SERV_PORT);
-#if 0
-    sin.sin_addr.s_addr = inet_addr(SERV_IP_ADDR);
-#else
     if(inet_pton(AF_INET, SERV_IP_ADDR, (void *)&sin.sin_addr)!=1)
     {
         perror("inet_pton");
         exit(1);
     }
-#endif
+
     /*2.2绑定*/
     if( bind(fd, (struct sockaddr *)&sin, sizeof(sin)) < 0)
     {
@@ -56,19 +56,42 @@ int main(void)
         perror("listen");
         exit(1);
     }
-    /*4.阻塞等待客户端连接请求*/
+    /*优化：使用多线程*/
     int newfd = -1;
-    newfd = accept(fd, NULL, NULL);
-    if(newfd < 0)
+
+    pthread_t tid;
+    struct sockaddr_in cin;
+    socklen_t addrlen = sizeof(cin);
+    while(1)
     {
-        perror("accept");
-        exit(1);
+        newfd = accept(fd, (struct sockaddr *)&cin, &addrlen);
+        if(newfd < 0)
+        {   
+            perror("accept");
+            exit(1);
+        }
+
+        char ipv4_addr[16];
+        if( !inet_ntop(AF_INET, (void *)&cin.sin_addr, ipv4_addr, sizeof(cin)))
+        {
+            perror("inet_ntop");
+            exit(1);
+        }
+        
+        pthread_create(&tid, NULL, cli_data_handle, (void *)&newfd);
     }
-    /*5.读写*/
-    //和newfd进行数据读写
+    
+    close(fd);
+    return 0;
+}
+
+void *cli_data_handle(void *arg)
+{
+    int newfd = *(int *)arg;
     int ret = -1;
     char buf[BUFSIZ];
-    while(1){
+    while(1)
+    {
         bzero(buf, BUFSIZ);
         do
         {
@@ -92,6 +115,4 @@ int main(void)
         }
     }
     close(newfd);
-    close(fd);
-    return 0;
 }
